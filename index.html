@@ -1,62 +1,83 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stadtteile als CSV herunterladen</title>
+    <title>City Districts & Postal Codes</title>
 </head>
 <body>
-    <h2>Stadtteile als CSV exportieren</h2>
-    <label for="city">Stadtname:</label>
+    <h2>Download Districts & Postal Codes as CSV</h2>
+    <label for="city">City Name:</label>
     <input type="text" id="city" value="Hamburg">
-    <button onclick="downloadCSV()">CSV herunterladen</button>
+    <button onclick="downloadCSV()">Download CSV</button>
 
     <script>
         async function downloadCSV() {
             const cityName = document.getElementById("city").value.trim();
             if (!cityName) {
-                alert("Bitte gib einen Stadtnamen ein!");
+                alert("Please enter a city name!");
                 return;
             }
 
             const url = "https://overpass-api.de/api/interpreter";
+
+            // Query: Get administrative districts and postal codes separately
             const query = `
                 [out:json];
                 area["name"="${cityName}"]->.searchArea;
+
+                // Get city districts (admin_level=10)
                 (
-                  relation["boundary"="administrative"]["admin_level"="10"](area.searchArea);
-                );
-                out body;
+                    relation["boundary"="administrative"]["admin_level"="10"](area.searchArea);
+                ) -> .districts;
+
+                // Get postal codes (addr:postcode) as nodes/ways
+                (
+                    node["addr:postcode"](area.searchArea);
+                    way["addr:postcode"](area.searchArea);
+                ) -> .postalcodes;
+
+                .districts out body;
+                .postalcodes out body;
             `;
 
             try {
-                // API-Request
                 const response = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }) });
                 const data = await response.json();
 
-                if (!data.elements.length) {
-                    alert("Keine Stadtteile gefunden. Prüfe den Stadtnamen.");
-                    return;
-                }
+                // Separate district names and postal codes
+                let districts = {};
+                let postalCodes = new Set();
 
-                // Daten extrahieren
-                let csvContent = "Stadtteil,Postleitzahl\n";
                 data.elements.forEach(el => {
-                    const name = el.tags?.name || "Unbekannt";
-                    const plz = el.tags?.["postal_code"] || "Keine PLZ";
-                    csvContent += `"${name}","${plz}"\n`;
+                    if (el.tags?.name && el.type === "relation") {
+                        // Store district names
+                        districts[el.id] = { name: el.tags.name, plz: new Set() };
+                    } else if (el.tags?.["addr:postcode"]) {
+                        // Store unique postal codes
+                        postalCodes.add(el.tags["addr:postcode"]);
+                    }
                 });
 
-                // CSV-Datei im Browser generieren und zum Download anbieten
+                // Convert postal codes to a string
+                const allPostalCodes = Array.from(postalCodes).join("; ");
+
+                // Generate CSV
+                let csvContent = "District,Postal Codes\n";
+                Object.values(districts).forEach(d => {
+                    csvContent += `"${d.name}","${allPostalCodes}"\n`;
+                });
+
+                // Create & Download CSV
                 const blob = new Blob([csvContent], { type: "text/csv" });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
-                link.download = `${cityName}_ortsteile.csv`;
+                link.download = `${cityName}_districts_postalcodes.csv`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             } catch (error) {
-                console.error("Fehler beim Abrufen der Daten:", error);
+                console.error("Error fetching data:", error);
             }
         }
     </script>
