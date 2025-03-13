@@ -1,37 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>City Districts & Postal Codes</title>
+    <title>Stadtteile & PLZ als CSV</title>
 </head>
 <body>
-    <h2>Download Districts & Postal Codes as CSV</h2>
-    <label for="city">City Name:</label>
+    <h2>Stadtteile & Postleitzahlen als CSV exportieren</h2>
+    <label for="city">Stadtname:</label>
     <input type="text" id="city" value="Hamburg">
-    <button onclick="downloadCSV()">Download CSV</button>
+    <button onclick="downloadCSV()">CSV herunterladen</button>
 
     <script>
         async function downloadCSV() {
             const cityName = document.getElementById("city").value.trim();
             if (!cityName) {
-                alert("Please enter a city name!");
+                alert("Bitte gib einen Stadtnamen ein!");
                 return;
             }
 
             const url = "https://overpass-api.de/api/interpreter";
 
-            // Query: Get administrative districts and postal codes separately
+            // Overpass Query für Stadtteile + Postleitzahlen
             const query = `
                 [out:json];
                 area["name"="${cityName}"]->.searchArea;
 
-                // Get city districts (admin_level=10)
+                // Stadtteile (admin_level=10)
                 (
                     relation["boundary"="administrative"]["admin_level"="10"](area.searchArea);
                 ) -> .districts;
 
-                // Get postal codes (addr:postcode) as nodes/ways
+                // Postleitzahlen (addr:postcode als Nodes & Ways)
                 (
                     node["addr:postcode"](area.searchArea);
                     way["addr:postcode"](area.searchArea);
@@ -45,39 +45,57 @@
                 const response = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }) });
                 const data = await response.json();
 
-                // Separate district names and postal codes
-                let districts = {};
-                let postalCodes = new Set();
+                let districts = {}; // Stadtteil-Infos
+                let postcodes = []; // PLZ-Knotenpunkte
 
+                // 1️⃣ Stadtteile speichern
                 data.elements.forEach(el => {
-                    if (el.tags?.name && el.type === "relation") {
-                        // Store district names
-                        districts[el.id] = { name: el.tags.name, plz: new Set() };
-                    } else if (el.tags?.["addr:postcode"]) {
-                        // Store unique postal codes
-                        postalCodes.add(el.tags["addr:postcode"]);
+                    if (el.type === "relation" && el.tags?.name) {
+                        districts[el.id] = { name: el.tags.name, plz: new Set(), bounds: el.bounds };
                     }
                 });
 
-                // Convert postal codes to a string
-                const allPostalCodes = Array.from(postalCodes).join("; ");
-
-                // Generate CSV
-                let csvContent = "District,Postal Codes\n";
-                Object.values(districts).forEach(d => {
-                    csvContent += `"${d.name}","${allPostalCodes}"\n`;
+                // 2️⃣ Postleitzahlen speichern
+                data.elements.forEach(el => {
+                    if (el.tags?.["addr:postcode"]) {
+                        postcodes.push({
+                            plz: el.tags["addr:postcode"],
+                            lat: el.lat,
+                            lon: el.lon
+                        });
+                    }
                 });
 
-                // Create & Download CSV
+                // 3️⃣ PLZ den Stadtteilen zuordnen
+                postcodes.forEach(pc => {
+                    for (let districtId in districts) {
+                        let d = districts[districtId];
+
+                        // Prüfen, ob die PLZ innerhalb der Stadtteil-Grenzen liegt (grobe Bounding Box Prüfung)
+                        if (d.bounds && pc.lat >= d.bounds.minlat && pc.lat <= d.bounds.maxlat && 
+                            pc.lon >= d.bounds.minlon && pc.lon <= d.bounds.maxlon) {
+                            d.plz.add(pc.plz);
+                        }
+                    }
+                });
+
+                // 4️⃣ CSV erstellen
+                let csvContent = "Stadtteil,Postleitzahlen\n";
+                Object.values(districts).forEach(d => {
+                    let plzList = Array.from(d.plz).join("; ");
+                    csvContent += `"${d.name}","${plzList}"\n`;
+                });
+
+                // CSV-Datei im Browser erzeugen & herunterladen
                 const blob = new Blob([csvContent], { type: "text/csv" });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
-                link.download = `${cityName}_districts_postalcodes.csv`;
+                link.download = `${cityName}_stadtteile_plz.csv`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             } catch (error) {
-                console.error("Error fetching data:", error);
+                console.error("Fehler beim Abrufen der Daten:", error);
             }
         }
     </script>
