@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stadtteile als CSV herunterladen</title>
+</head>
+<body>
+    <h2>Stadtteile als CSV exportieren</h2>
+    <label for="city">Stadtname:</label>
+    <input type="text" id="city" value="Hamburg">
+    <button onclick="downloadCSV()">CSV herunterladen</button>
+
+    <script>
+        async function downloadCSV() {
+            const cityName = document.getElementById("city").value.trim();
+            if (!cityName) {
+                alert("Bitte gib einen Stadtnamen ein!");
+                return;
+            }
+
+            const url = "https://overpass-api.de/api/interpreter";
+            const query = `
+                [out:json];
+                area["name"="${cityName}"]->.searchArea;
+                (
+                  relation["boundary"="administrative"]["admin_level"="10"](area.searchArea);
+                );
+                out body;
+            `;
+
+            try {
+                // API-Request
+                const response = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }) });
+                const data = await response.json();
+
+                if (!data.elements.length) {
+                    alert("Keine Stadtteile gefunden. Prüfe den Stadtnamen.");
+                    return;
+                }
+
+                // Daten extrahieren
+                let csvContent = "Stadtteil,Postleitzahl\n";
+                data.elements.forEach(el => {
+                    const name = el.tags?.name || "Unbekannt";
+                    const plz = el.tags?.["postal_code"] || "Keine PLZ";
+                    csvContent += `"${name}","${plz}"\n`;
+                });
+
+                // CSV-Datei im Browser generieren und zum Download anbieten
+                const blob = new Blob([csvContent], { type: "text/csv" });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `${cityName}_ortsteile.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (error) {
+                console.error("Fehler beim Abrufen der Daten:", error);
+            }
+        }
+    </script>
+</body>
+</html>
